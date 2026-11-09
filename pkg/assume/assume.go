@@ -477,7 +477,7 @@ func AssumeCommand(c *cli.Context) error {
 			return nil
 		}
 
-		if profile.RawConfig != nil && profile.RawConfig.HasKey("credential_process") && (assumeFlags.Bool("export-all-env-vars") || cfg.DefaultExportAllEnvVar) {
+		if profileSelfRefreshes(profile) && (assumeFlags.Bool("export-all-env-vars") || cfg.DefaultExportAllEnvVar) {
 			output := PrepareStringsForShellScript([]string{creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, profile.Name, region, sessionExpiration, "true", profile.SSOStartURL(), profile.AWSConfig.SSORoleName, profile.SSORegion(), profile.AWSConfig.SSOAccountID, ""})
 			fmt.Printf("GrantedAssume %s %s %s %s %s %s %s %s %s %s %s %s", output...)
 			return nil
@@ -487,9 +487,9 @@ func AssumeCommand(c *cli.Context) error {
 		// to export more environment variables, add then in the assume and assume.fish scripts then append them to this output preparation function
 		// the shell script treats "None" as an empty string and will not set a value for that positional output
 
-		// If the profile uses "credential_process" to source credential externally then do not set accessKeyId, secretAccessKey, sessionToken
-		// so that aws cli automatically refreshes credential when they expire.
-		if profile.RawConfig != nil && profile.RawConfig.HasKey("credential_process") {
+		// If the profile uses "credential_process" or an "aws login" session to source credentials externally then do not set
+		// accessKeyId, secretAccessKey, sessionToken so that aws cli automatically refreshes credentials when they expire.
+		if profileSelfRefreshes(profile) {
 			output := PrepareStringsForShellScript([]string{"", "", "", profile.Name, region, "", "", "", "", "", "", ""})
 			fmt.Printf("GrantedAssume %s %s %s %s %s %s %s %s %s %s %s %s", output...)
 
@@ -517,6 +517,19 @@ func AssumeCommand(c *cli.Context) error {
 
 // PrepareCredentialsForShellScript will set empty values to "None", this is required by the shell script to identify which variables to unset
 // it is also required to ensure that the return values are correctly split, e.g if sessionToken is "" then profile name will be used to set the session token environment variable
+// profileSelfRefreshes reports whether the AWS CLI and SDKs can refresh the profile's
+// credentials themselves. For such profiles assume exports only AWS_PROFILE (and the
+// region) rather than short-lived keys, unless the user asks for all env vars.
+// This is true for credential_process profiles and for root `aws login` profiles,
+// whose access tokens last 15 minutes. Roles chained from a login profile export
+// real keys as usual, since the CLI cannot resolve that chain by itself.
+func profileSelfRefreshes(profile *cfaws.Profile) bool {
+	if profile.RawConfig != nil && profile.RawConfig.HasKey("credential_process") {
+		return true
+	}
+	return profile.ProfileType == cfaws.ProfileTypeAWSLogin && profile.AWSConfig.RoleARN == ""
+}
+
 func PrepareStringsForShellScript(in []string) []interface{} {
 	out := []interface{}{}
 	for _, s := range in {

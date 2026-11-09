@@ -36,6 +36,8 @@ Granted supports MacOS, Linux, and Windows. Our Windows support is less extensiv
 
 Currently Granted supports accessing roles in AWS. If you'd like to see support for another cloud provider please [open an issue](https://github.com/fwdcloudsec/granted/issues/new)!
 
+Granted works with profiles backed by IAM Identity Center (SSO), IAM users, `credential_process`, and `aws login` sessions (AWS CLI 2.32.0 or later; Granted runs `aws login` for you when the session is missing or expired), plus role chaining via `source_profile` on top of any of these.
+
 ## Documentation
 
 Get started by [reading our documentation](https://docs.granted.dev/getting-started).
