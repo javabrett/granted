@@ -402,6 +402,20 @@ func TestLoginRefreshError(t *testing.T) {
 	assert.Same(t, plain, loginRefreshError(plain))
 }
 
+func TestDescribeLoginSession(t *testing.T) {
+	account, principal := describeLoginSession("arn:aws:iam::123456789012:user/alice")
+	assert.Equal(t, "123456789012", account)
+	assert.Equal(t, "user/alice", principal)
+
+	account, principal = describeLoginSession("arn:aws:iam::123456789012:root")
+	assert.Equal(t, "123456789012", account)
+	assert.Equal(t, "root", principal)
+
+	account, principal = describeLoginSession("not-an-arn")
+	assert.Empty(t, account)
+	assert.Empty(t, principal)
+}
+
 func TestSweepLoginTempDirs(t *testing.T) {
 	root := t.TempDir()
 	old := filepath.Join(root, "login-old")

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -263,6 +264,8 @@ func captureLoginSession(ctx context.Context, root *Profile, session string, con
 		"AWS_SHARED_CREDENTIALS_FILE=" + filepath.Join(tmp, "credentials"),
 		"AWS_LOGIN_CACHE_DIRECTORY=" + cacheDir,
 	}
+	printLoginIdentityHint(root.Name, session)
+
 	remote := configOpts.UseDeviceCode || isHeadlessEnvironment()
 	if err := loginCommand(ctx, root.Name, remote, configOpts.Args, env); err != nil {
 		return nil, err
@@ -291,6 +294,28 @@ func captureLoginSession(ctx context.Context, root *Profile, session string, con
 		tok.SignInRegion = region
 	}
 	return &tok, nil
+}
+
+// printLoginIdentityHint tells the user which identity the browser must sign in as.
+// `aws login` takes whatever identity the browser already holds, and Granted rejects
+// any other, so this is the one moment the user can steer the outcome.
+func printLoginIdentityHint(profileName, session string) {
+	account, principal := describeLoginSession(session)
+	if account != "" && principal != "" {
+		clio.Infof("Profile %s is bound to %s in account %s. Sign in to the AWS console as that identity; if the browser is already signed in as someone else, choose 'Sign in to a new session' rather than continuing with the active one.", profileName, principal, account)
+		return
+	}
+	clio.Infof("Profile %s is bound to %s. Sign in to the AWS console as that identity.", profileName, session)
+}
+
+// describeLoginSession splits an IAM principal ARN such as
+// arn:aws:iam::123456789012:user/alice into its account and "user/alice" parts.
+func describeLoginSession(session string) (account, principal string) {
+	parts := strings.SplitN(session, ":", 6)
+	if len(parts) != 6 {
+		return "", ""
+	}
+	return parts[4], parts[5]
 }
 
 // sweepLoginTempDirs removes capture directories older than loginTempMaxAge. They
