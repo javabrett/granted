@@ -27,6 +27,7 @@ import (
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/ini.v1"
 )
 
 // loginCacheToken mirrors the JSON written by `aws login` and read by logincreds.
@@ -58,7 +59,14 @@ func testDPOPKeyPEM(t *testing.T) string {
 // AWS_LOGIN_CACHE_DIRECTORY and returns its path.
 func writeLoginToken(t *testing.T, session string, expiresAt time.Time, accessKeyID string) string {
 	t.Helper()
-	path, err := logincreds.StandardCachedTokenFilepath(session, os.Getenv("AWS_LOGIN_CACHE_DIRECTORY"))
+	return writeLoginTokenAt(t, os.Getenv("AWS_LOGIN_CACHE_DIRECTORY"), session, expiresAt, accessKeyID)
+}
+
+// writeLoginTokenAt writes a cached login token for the session into dir, in the
+// layout `aws login` uses, and returns its path.
+func writeLoginTokenAt(t *testing.T, dir, session string, expiresAt time.Time, accessKeyID string) string {
+	t.Helper()
+	path, err := logincreds.StandardCachedTokenFilepath(session, dir)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
 
@@ -91,16 +99,18 @@ func readLoginToken(t *testing.T, path string) loginCacheToken {
 
 // fakeTokenClient stands in for the signin client used to refresh a session.
 type fakeTokenClient struct {
-	t     *testing.T
-	out   *signin.CreateOAuth2TokenOutput
-	err   error
-	calls int
-	in    *signin.CreateOAuth2TokenInput
+	t        *testing.T
+	out      *signin.CreateOAuth2TokenOutput
+	err      error
+	calls    int
+	in       *signin.CreateOAuth2TokenInput
+	optCount int
 }
 
 func (f *fakeTokenClient) CreateOAuth2Token(ctx context.Context, in *signin.CreateOAuth2TokenInput, opts ...func(*signin.Options)) (*signin.CreateOAuth2TokenOutput, error) {
 	f.calls++
 	f.in = in
+	f.optCount = len(opts)
 	if f.out == nil && f.err == nil {
 		f.t.Fatal("CreateOAuth2Token called unexpectedly")
 	}
@@ -127,6 +137,17 @@ type loginCall struct {
 	profile     string
 	remote      bool
 	passthrough []string
+	env         []string
+}
+
+// envValue returns the value of key in a KEY=VALUE environment slice.
+func envValue(env []string, key string) string {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, key+"=") {
+			return strings.TrimPrefix(kv, key+"=")
+		}
+	}
+	return ""
 }
 
 // stubLogin replaces the aws login command for the duration of the test. onLogin is
@@ -136,8 +157,8 @@ func stubLogin(t *testing.T, onLogin func(call loginCall) error) *[]loginCall {
 	stubHeadless(t, false)
 	calls := &[]loginCall{}
 	orig := loginCommand
-	loginCommand = func(ctx context.Context, profileName string, remote bool, passthrough []string) error {
-		call := loginCall{profile: profileName, remote: remote, passthrough: passthrough}
+	loginCommand = func(ctx context.Context, profileName string, remote bool, passthrough []string, extraEnv []string) error {
+		call := loginCall{profile: profileName, remote: remote, passthrough: passthrough, env: extraEnv}
 		*calls = append(*calls, call)
 		if onLogin == nil {
 			return nil
@@ -208,6 +229,11 @@ func TestAwsLoginAssumer_ProfileMatchesType(t *testing.T) {
 	a := &AwsLoginAssumer{}
 	assert.True(t, a.ProfileMatchesType(nil, config.SharedConfig{LoginSession: testLoginSession}))
 	assert.False(t, a.ProfileMatchesType(nil, config.SharedConfig{}))
+
+	managed := ini.Empty().Section("profile managed")
+	managed.Key(GrantedLoginSessionKey).SetValue(testLoginSession)
+	assert.True(t, a.ProfileMatchesType(managed, config.SharedConfig{}))
+	assert.False(t, a.ProfileMatchesType(ini.Empty().Section("profile plain"), config.SharedConfig{}))
 	assert.Equal(t, ProfileTypeAWSLogin, a.Type())
 	assert.Same(t, AssumerFromType(ProfileTypeAWSLogin), assumers[4])
 }
