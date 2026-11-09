@@ -104,6 +104,14 @@ func stubRegionRecorder(t *testing.T, client logincreds.TokenAPIClient) *[]strin
 	return regions
 }
 
+func TestIsLoginRootProfile(t *testing.T) {
+	assert.True(t, IsLoginRootProfile(loadTestProfile(t, "managed-login")))
+	assert.True(t, IsLoginRootProfile(loadTestProfile(t, "login-prof")))
+	assert.False(t, IsLoginRootProfile(loadTestProfile(t, "managed-role")), "chained roles are cached by credential-process")
+	assert.False(t, IsLoginRootProfile(loadTestProfile(t, "plain-iam")))
+	assert.False(t, IsLoginRootProfile(nil))
+}
+
 func TestLoadProfiles_ManagedLoginProfileTypes(t *testing.T) {
 	ctx := context.Background()
 	profiles := writeLoginFixtures(t)

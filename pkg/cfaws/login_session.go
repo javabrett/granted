@@ -69,6 +69,13 @@ func IsManagedLoginProfile(p *Profile) bool {
 	return p != nil && p.RawConfig != nil && p.RawConfig.HasKey(GrantedLoginSessionKey)
 }
 
+// IsLoginRootProfile reports whether the profile is an `aws login` session itself,
+// rather than a role chained from one. Its credentials come straight from the
+// session's own store and last 15 minutes.
+func IsLoginRootProfile(p *Profile) bool {
+	return p != nil && p.ProfileType == ProfileTypeAWSLogin && len(p.Parents) == 0
+}
+
 // loginSessionARN returns the session identifier the profile declares: the
 // `granted_login_session` value for managed profiles, else the SDK-parsed `login_session`.
 func loginSessionARN(p *Profile) string {
