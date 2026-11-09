@@ -22,6 +22,7 @@ import (
 	"github.com/common-fate/clio/ansi"
 	"github.com/common-fate/clio/clierr"
 	"github.com/fatih/color"
+	"github.com/fwdcloudsec/granted/internal/build"
 	"github.com/fwdcloudsec/granted/pkg/assumeprint"
 	"github.com/fwdcloudsec/granted/pkg/browser"
 	"github.com/fwdcloudsec/granted/pkg/cfaws"
@@ -496,6 +497,8 @@ func AssumeCommand(c *cli.Context) error {
 			return nil
 		}
 
+		warnIfManagedLoginLacksCredentialProcess(profile)
+
 		if assumeFlags.Bool("sso") {
 			output := PrepareStringsForShellScript([]string{creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, "", region, sessionExpiration, "true", profile.SSOStartURL(), profile.AWSConfig.SSORoleName, profile.SSORegion(), profile.AWSConfig.SSOAccountID, ""})
 			fmt.Printf("GrantedAssume %s %s %s %s %s %s %s %s %s %s %s %s", output...)
@@ -527,7 +530,24 @@ func profileSelfRefreshes(profile *cfaws.Profile) bool {
 	if profile.RawConfig != nil && profile.RawConfig.HasKey("credential_process") {
 		return true
 	}
-	return profile.ProfileType == cfaws.ProfileTypeAWSLogin && profile.AWSConfig.RoleARN == ""
+	if profile.ProfileType == cfaws.ProfileTypeAWSLogin && profile.AWSConfig.RoleARN == "" {
+		// A native login_session profile refreshes from the AWS CLI's own cache. A
+		// Granted-managed session without credential_process has nothing the CLI could
+		// refresh from, so its credentials are exported as plain keys.
+		return !cfaws.IsManagedLoginProfile(profile)
+	}
+	return false
+}
+
+// warnIfManagedLoginLacksCredentialProcess tells the user when a Granted-managed
+// login profile exports raw 15 minute keys because the CLI cannot call back into
+// Granted for refreshes.
+func warnIfManagedLoginLacksCredentialProcess(profile *cfaws.Profile) {
+	if !cfaws.IsManagedLoginProfile(profile) || profile.AWSConfig.RoleARN != "" || profile.RawConfig.HasKey("credential_process") {
+		return
+	}
+	clio.Warnf("Profile %s has no credential_process, so the exported credentials expire in about 15 minutes and cannot be refreshed", profile.Name)
+	clio.Infof("Add 'credential_process = %s credential-process --profile=%s' to the profile so the AWS CLI refreshes through Granted", build.GrantedBinaryName(), profile.Name)
 }
 
 func PrepareStringsForShellScript(in []string) []interface{} {
